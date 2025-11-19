@@ -46,11 +46,6 @@ export const signupSchema = z
       .string()
       .min(1, 'O e-mail é obrigatório')
       .email('E-mail inválido'),
-    telefone: z
-      .string()
-      .regex(/^\d{10,11}$/, 'O telefone deve conter 10 ou 11 dígitos (apenas números)')
-      .optional()
-      .or(z.literal('')),
     password: z
       .string()
       .min(6, 'A senha deve ter no mínimo 6 caracteres'),

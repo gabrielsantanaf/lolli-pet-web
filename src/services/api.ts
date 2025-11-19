@@ -9,7 +9,7 @@
  */
 
 // Obtém a URL base da API a partir das variáveis de ambiente
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 /**
  * Interface para respostas de erro da API
@@ -35,20 +35,33 @@ export interface SignupData {
   nome: string;
   email: string;
   password: string;
-  telefone?: string;
 }
 
 /**
- * Interface para resposta de autenticação
+ * Interface para resposta do endpoint /token (retorna apenas o token)
+ */
+interface TokenResponse {
+  token: string;
+}
+
+/**
+ * Interface para dados do usuário retornados pelo /veterinarios/me
+ */
+interface UserData {
+  id: number;
+  nome: string;
+  email: string;
+  crmv?: string;
+  especialidade?: string;
+}
+
+/**
+ * Interface para resposta completa de autenticação
+ * (combina token + dados do usuário)
  */
 export interface AuthResponse {
   token: string;
-  user: {
-    id: string;
-    nome: string;
-    email: string;
-    telefone?: string;
-  };
+  user: UserData;
 }
 
 /**
@@ -79,14 +92,14 @@ export const removeToken = (): void => {
  *
  * @param user - Dados do usuário
  */
-export const setUser = (user: AuthResponse['user']): void => {
+export const setUser = (user: UserData): void => {
   localStorage.setItem('user', JSON.stringify(user));
 };
 
 /**
  * Obtém os dados do usuário do localStorage
  */
-export const getUser = (): AuthResponse['user'] | null => {
+export const getUser = (): UserData | null => {
   const userStr = localStorage.getItem('user');
   if (!userStr) return null;
 
@@ -128,7 +141,7 @@ const getHeaders = (includeAuth = false): HeadersInit => {
 /**
  * Função genérica para fazer requisições HTTP
  *
- * @param endpoint - Endpoint da API (ex: '/auth/login')
+ * @param endpoint - Endpoint da API (ex: '/token')
  * @param options - Opções do fetch
  * @param includeAuth - Se true, inclui o token de autenticação
  * @returns Promise com os dados da resposta
@@ -197,59 +210,113 @@ const apiRequest = async <T>(
 // ============================================================
 
 /**
+ * Busca os dados do veterinário logado no servidor
+ *
+ * Envia para: GET /veterinarios/me
+ * Headers: Authorization: Bearer {token}
+ * Retorna: { id, nome, email, crmv, especialidade }
+ *
+ * Esta função é chamada após o login para obter os dados completos do usuário
+ */
+export const getMe = async (): Promise<UserData> => {
+  console.log('[AUTH] Buscando dados do usuário logado');
+
+  const userData = await apiRequest<UserData>(
+    '/veterinarios/me',
+    {
+      method: 'GET',
+    },
+    true // Inclui token de autenticação
+  );
+
+  // Atualiza o localStorage com os dados frescos do servidor
+  setUser(userData);
+
+  return userData;
+};
+
+/**
  * Faz login do usuário
  *
- * Envia para: POST /auth/login
- * Body: { email: string, password: string }
- * Retorna: { token: string, user: {...} }
+ * Fluxo:
+ * 1. POST /token → recebe apenas o token JWT
+ * 2. GET /veterinarios/me → busca dados completos do usuário
+ * 3. Salva token e dados no localStorage
+ * 4. Retorna { token, user }
  *
  * @param data - Dados de login (email e senha)
  */
 export const login = async (data: LoginData): Promise<AuthResponse> => {
   console.log('[AUTH] Fazendo login com email:', data.email);
 
-  const response = await apiRequest<AuthResponse>(
-    '/auth/login',
-    {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }
-  );
+  try {
+    // PASSO 1: Faz login e recebe apenas o token
+    const tokenResponse = await apiRequest<TokenResponse>(
+      '/token',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
 
-  // Salva token e dados do usuário no localStorage
-  setToken(response.token);
-  setUser(response.user);
+    console.log('[AUTH] ✅ Token recebido');
 
-  console.log('[AUTH] Login bem-sucedido! Token salvo.');
-  return response;
+    // PASSO 2: Salva o token no localStorage
+    setToken(tokenResponse.token);
+
+    // PASSO 3: Busca dados completos do usuário usando o token
+    console.log('[AUTH] Buscando dados do usuário...');
+    const userData = await getMe();
+
+    console.log('[AUTH] ✅ Login bem-sucedido! Dados do usuário:', userData);
+
+    // PASSO 4: Retorna token + dados do usuário
+    return {
+      token: tokenResponse.token,
+      user: userData
+    };
+  } catch (error) {
+    // Se der erro em qualquer etapa, remove o token e repassa o erro
+    console.error('[AUTH] ❌ Erro no login:', error);
+    removeToken();
+    throw error;
+  }
 };
 
 /**
- * Registra um novo usuário
+ * Registra um novo usuário (veterinário)
  *
- * Envia para: POST /auth/signup (ou /auth/register)
- * Body: { nome: string, email: string, password: string, telefone?: string }
- * Retorna: { token: string, user: {...} }
+ * Envia para: POST /veterinarios
+ * Body: { nome, email, password, crmv, especialidade }
+ * Retorna: { id, nome, email }
+ *
+ * Após criar o veterinário, você ainda precisa fazer login
+ * para obter o token de autenticação
  *
  * @param data - Dados de cadastro
  */
 export const signup = async (data: SignupData): Promise<AuthResponse> => {
   console.log('[AUTH] Registrando novo usuário:', data.email);
 
-  const response = await apiRequest<AuthResponse>(
-    '/auth/signup',
+  // Cria o veterinário
+  await apiRequest<UserData>(
+    '/veterinarios',
     {
       method: 'POST',
       body: JSON.stringify(data),
     }
   );
 
-  // Salva token e dados do usuário no localStorage
-  setToken(response.token);
-  setUser(response.user);
+  console.log('[AUTH] Veterinário criado! Fazendo login...');
+
+  // Após criar, faz login automaticamente
+  const loginResponse = await login({
+    email: data.email,
+    password: data.password
+  });
 
   console.log('[AUTH] Cadastro bem-sucedido! Token salvo.');
-  return response;
+  return loginResponse;
 };
 
 /**
@@ -265,9 +332,35 @@ export const logout = (): void => {
 
 /**
  * Verifica se o usuário está autenticado
+ * (verifica apenas se existe token no localStorage)
  */
 export const isAuthenticated = (): boolean => {
   return !!getToken();
+};
+
+/**
+ * Revalida a autenticação buscando dados do servidor
+ * Útil para verificar se o token ainda é válido
+ *
+ * @returns true se o token é válido, false caso contrário
+ */
+export const revalidateAuth = async (): Promise<boolean> => {
+  const token = getToken();
+
+  if (!token) {
+    return false;
+  }
+
+  try {
+    await getMe(); // Se conseguir buscar, token é válido
+    return true;
+  } catch (error) {
+    // Token inválido ou expirado
+    console.error('[AUTH] Token inválido:', error);
+    removeToken();
+    removeUser();
+    return false;
+  }
 };
 
 // ============================================================
@@ -296,6 +389,48 @@ export const cadastrarCliente = async (data: unknown): Promise<unknown> => {
   );
 };
 
+/**
+ * Lista todos os clientes
+ *
+ * Envia para: GET /clientes
+ * Headers: Authorization: Bearer {token}
+ * Retorna: Array de clientes
+ */
+export const listarClientes = async (): Promise<unknown[]> => {
+  console.log('[CLIENTES] Listando clientes');
+
+  return apiRequest(
+    '/clientes',
+    {
+      method: 'GET',
+    },
+    true // Inclui token de autenticação
+  );
+};
+
+// ============================================================
+// ENDPOINTS DE PETS
+// ============================================================
+
+/**
+ * Lista todos os pets
+ *
+ * Envia para: GET /pets
+ * Headers: Authorization: Bearer {token}
+ * Retorna: Array de pets
+ */
+export const listarPets = async (): Promise<unknown[]> => {
+  console.log('[PETS] Listando pets');
+
+  return apiRequest(
+    '/pets',
+    {
+      method: 'GET',
+    },
+    true // Inclui token de autenticação
+  );
+};
+
 // ============================================================
 // ENDPOINTS DE AGENDAMENTOS
 // ============================================================
@@ -303,9 +438,9 @@ export const cadastrarCliente = async (data: unknown): Promise<unknown> => {
 /**
  * Cria um agendamento clínico
  *
- * Envia para: POST /agendamentos/clinico
+ * Envia para: POST /agendamentos
  * Headers: Authorization: Bearer {token}
- * Body: { clienteId, petId, data, hora, servico, observacoes }
+ * Body: { servico: 'clinico', pet_id, data_hora, observacoes }
  *
  * @param data - Dados do agendamento clínico
  */
@@ -313,10 +448,10 @@ export const agendarClinico = async (data: unknown): Promise<unknown> => {
   console.log('[AGENDAMENTO] Criando agendamento clínico');
 
   return apiRequest(
-    '/agendamentos/clinico',
+    '/agendamentos',
     {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({ ...(data as Record<string, unknown>), servico: 'clinico' }),
     },
     true // Inclui token de autenticação
   );
@@ -325,9 +460,9 @@ export const agendarClinico = async (data: unknown): Promise<unknown> => {
 /**
  * Cria um agendamento de petshop
  *
- * Envia para: POST /agendamentos/petshop
+ * Envia para: POST /agendamentos
  * Headers: Authorization: Bearer {token}
- * Body: { clienteId, petId, data, hora, servico, observacoes }
+ * Body: { servico: 'petshop', pet_id, data_hora, observacoes }
  *
  * @param data - Dados do agendamento petshop
  */
@@ -335,10 +470,10 @@ export const agendarPetshop = async (data: unknown): Promise<unknown> => {
   console.log('[AGENDAMENTO] Criando agendamento petshop');
 
   return apiRequest(
-    '/agendamentos/petshop',
+    '/agendamentos',
     {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({ ...(data as Record<string, unknown>), servico: 'petshop' }),
     },
     true // Inclui token de autenticação
   );
@@ -358,6 +493,70 @@ export const listarAgendamentos = async (): Promise<unknown[]> => {
     '/agendamentos',
     {
       method: 'GET',
+    },
+    true // Inclui token de autenticação
+  );
+};
+
+/**
+ * Busca um agendamento específico por ID
+ *
+ * Envia para: GET /agendamentos/:id
+ * Headers: Authorization: Bearer {token}
+ * Retorna: Dados do agendamento
+ *
+ * @param id - ID do agendamento
+ */
+export const buscarAgendamento = async (id: number): Promise<unknown> => {
+  console.log('[AGENDAMENTO] Buscando agendamento:', id);
+
+  return apiRequest(
+    `/agendamentos/${id}`,
+    {
+      method: 'GET',
+    },
+    true // Inclui token de autenticação
+  );
+};
+
+/**
+ * Atualiza um agendamento
+ *
+ * Envia para: PUT /agendamentos/:id
+ * Headers: Authorization: Bearer {token}
+ * Body: { status, observacoes, ... }
+ *
+ * @param id - ID do agendamento
+ * @param data - Dados para atualizar
+ */
+export const atualizarAgendamento = async (id: number, data: unknown): Promise<unknown> => {
+  console.log('[AGENDAMENTO] Atualizando agendamento:', id);
+
+  return apiRequest(
+    `/agendamentos/${id}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    },
+    true // Inclui token de autenticação
+  );
+};
+
+/**
+ * Deleta um agendamento
+ *
+ * Envia para: DELETE /agendamentos/:id
+ * Headers: Authorization: Bearer {token}
+ *
+ * @param id - ID do agendamento
+ */
+export const deletarAgendamento = async (id: number): Promise<unknown> => {
+  console.log('[AGENDAMENTO] Deletando agendamento:', id);
+
+  return apiRequest(
+    `/agendamentos/${id}`,
+    {
+      method: 'DELETE',
     },
     true // Inclui token de autenticação
   );
@@ -391,12 +590,18 @@ export const buscarProntuarios = async (params?: Record<string, string>): Promis
   );
 };
 
+// ============================================================
+// EXPORT DEFAULT
+// ============================================================
+
 export default {
   // Auth
   login,
   signup,
   logout,
   isAuthenticated,
+  revalidateAuth,
+  getMe,
   getToken,
   setToken,
   removeToken,
@@ -406,11 +611,18 @@ export default {
 
   // Clientes
   cadastrarCliente,
+  listarClientes,
+
+  // Pets
+  listarPets,
 
   // Agendamentos
   agendarClinico,
   agendarPetshop,
   listarAgendamentos,
+  buscarAgendamento,
+  atualizarAgendamento,
+  deletarAgendamento,
 
   // Prontuários
   buscarProntuarios,

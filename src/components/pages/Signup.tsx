@@ -14,7 +14,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate, Link } from 'react-router-dom';
-import { User, Mail, Phone, Lock, UserPlus, AlertCircle } from 'lucide-react';
+import { User, Mail, Lock, UserPlus, AlertCircle } from 'lucide-react';
 import { signupSchema, type SignupFormData } from '../schemas/AuthSchemas';
 import { useAuth } from '../context/useAuth';
 import type { ApiError } from '../../services/api';
@@ -37,7 +37,7 @@ export default function Signup() {
    * Handler para submissão do formulário
    *
    * Envia para: POST /api/auth/signup
-   * Body: { nome: string, email: string, password: string, telefone?: string }
+   * Body: { nome: string, email: string, password: string}
    * Resposta esperada: { token: string, user: {...} }
    */
   const onSubmit = async (data: SignupFormData) => {
@@ -49,7 +49,7 @@ export default function Signup() {
     try {
       // Chama a função de signup do AuthContext
       // Isso internamente chama: POST /api/auth/signup
-      await signup(data.nome, data.email, data.password, data.telefone);
+      await signup(data.nome, data.email, data.password);
 
       console.log('[Signup] Cadastro bem-sucedido! Redirecionando...');
 
@@ -174,45 +174,6 @@ export default function Signup() {
               {errors.email && (
                 <p className="mt-1 text-sm text-red-600 dark:text-red-400">
                   {errors.email.message}
-                </p>
-              )}
-            </div>
-
-            {/* Campo de Telefone */}
-            <div>
-              <label
-                htmlFor="telefone"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-              >
-                Telefone <span className="text-gray-500">(opcional)</span>
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Phone className="h-5 w-5 text-gray-400" />
-                </div>
-                <input
-                  {...register('telefone')}
-                  id="telefone"
-                  type="tel"
-                  autoComplete="tel"
-                  placeholder="11987654321"
-                  className={`
-                    block w-full pl-10 pr-3 py-3 border rounded-lg
-                    bg-white dark:bg-gray-700
-                    text-gray-900 dark:text-white
-                    placeholder-gray-400 dark:placeholder-gray-500
-                    focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent
-                    ${
-                      errors.telefone
-                        ? 'border-red-300 dark:border-red-600'
-                        : 'border-gray-300 dark:border-gray-600'
-                    }
-                  `}
-                />
-              </div>
-              {errors.telefone && (
-                <p className="mt-1 text-sm text-red-600 dark:text-red-400">
-                  {errors.telefone.message}
                 </p>
               )}
             </div>
@@ -347,7 +308,7 @@ export default function Signup() {
           <p>
             • Body:{' '}
             <code className="bg-white dark:bg-gray-800 px-1 py-0.5 rounded">
-              {'{ nome, email, password, telefone }'}
+              {'{ nome, email, password}'}
             </code>
           </p>
           <p>
